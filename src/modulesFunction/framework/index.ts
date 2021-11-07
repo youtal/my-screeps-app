@@ -179,7 +179,7 @@ export default class App {
 
         this.execLifecycleCallback('tickStart')
 
-        // 执行主要的 onwork 工作
+        // 执行主要的 work 工作
         this.do(Game.rooms)
         this.do(Game.structures, false)
         this.do(Game.creeps)
