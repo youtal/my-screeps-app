@@ -13,6 +13,24 @@ const terrainCost = {
     '11': [1, 1]
 }
 
+//不能通过的建筑
+const obstacles = [
+    "spawn",
+    "controller",
+    "constructedWall",
+    "extension",
+    "link",
+    "storage",
+    "tower",
+    "observer",
+    "powerSpawn",
+    "lab",
+    "terminal",
+    "nuker",
+    "factory",
+    "invaderCore"
+];
+
 /**
  * key:形如'12,20,W42N21;20,35,W43N20;00'或‘W42N21;12,20;20,35;10’
  *
@@ -72,9 +90,47 @@ function findPath(origin: RoomPosition, goal: RoomPosition, ops: moveOption = {}
             const room = Game.rooms[roomName]
             if (!room) return
 
-            //生成CostMatrix
+            //根据配置确定swap和plain的cost
             const terrainCostKey = `${swapSymbol}${roadSymbol}`
             let [swapCost, plainCost] = [terrainCost[terrainCostKey][0], terrainCost[terrainCostKey][1]]
+
+            //生成新的costMatrix,并按照地形权重配置
+            let cost = new PathFinder.CostMatrix
+            const terrain = new Room.Terrain(roomName)
+            for (let x = 0; x < 50; ++x) for (let y = 0; y < 50; ++y) {
+                const type = terrain.get(x, y)
+                const weight =
+                    type === TERRAIN_MASK_WALL ? 0xff :
+                        type === TERRAIN_MASK_SWAMP ? swapCost : plainCost
+                cost.set(x, y, weight)
+            }
+
+            const addCost = (item: Structure | ConstructionSite) => {
+                // 更倾向走道路
+                if (item.structureType === STRUCTURE_ROAD) {
+                    // 造好的路可以走
+                    if (item instanceof Structure) cost.set(item.pos.x, item.pos.y, 1)
+                    // 路的工地保持原有 cost
+                    else return
+                }
+                // 非我rampart即视为不可通过，无论是否为public状态，防止被放风筝
+                else if (item instanceof StructureRampart) {
+                    if (!item.my) cost.set(item.pos.x, item.pos.y, 0xff)
+                    else return;
+                }
+                //挡路建筑设为255
+                else if (obstacles.includes(item.structureType)) {
+                    cost.set(item.pos.x, item.pos.y, 0xff)
+                }
+            }
+
+            //按照建筑配置
+            const structures = room.find(FIND_STRUCTURES)
+            const sites = room.find(FIND_CONSTRUCTION_SITES)
+            structures.forEach(addCost)
+            sites.forEach(addCost)
+
+            //按照ops.ignoreCreep和ops.disableCross来确定creep所占权重
 
         }
     })
