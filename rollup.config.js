@@ -1,6 +1,10 @@
 import clear from 'rollup-plugin-clear'
 import screeps from 'rollup-plugin-screeps'
 import copy from 'rollup-plugin-copy'
+import html from 'rollup-plugin-html'
+import typescript from 'rollup-plugin-typescript2'
+import resolve from '@rollup/plugin-node-resolve'
+import commonjs from '@rollup/plugin-commonjs'
 
 let config
 // 根据指定的目标获取对应的配置项
@@ -42,6 +46,22 @@ export default {
     plugins: [
         // 清除上次编译成果
         clear({targets: ["dist"]}),
+        // 打包依赖
+        resolve(),
+        // 模块化依赖
+        commonjs(),
+        // 构建可能存在的 html 文件
+        html({
+            include: '**/*.html',
+            htmlMinifierOptions: {
+                collapseWhitespace: true,
+                collapseInlineTagWhitespace: true,
+                minifyCSS: true,
+                removeComments: true
+            }
+        }),
+        // 编译 ts
+        typescript({ tsconfig: "./tsconfig.json" }),
         // 执行上传或者复制
         pluginDeploy
     ]
