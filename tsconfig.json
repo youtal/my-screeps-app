@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "es2017",
     "sourceMap": true,
-    "module": "CommonJS"
+    "moduleResolution": "Node"
   },
   "exclude": [
     "node_modules"

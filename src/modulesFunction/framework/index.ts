@@ -16,7 +16,7 @@ const BOT_NAME_SUFFIX = 'Framework'
 /**
  * 默认的 bot 名称
  */
-const DEFAULT_BOT_NAME = `ping${BOT_NAME_SUFFIX}`
+const DEFAULT_BOT_NAME = `ping ${BOT_NAME_SUFFIX}`
 
 export default class App {
     /**
