@@ -1,7 +1,6 @@
 import {Role} from "../../role/role";
 
-
-type AllowCrossRuleFunc = (creep: Creep | PowerCreep) => boolean
+type ALLOW_CROSS_RULE = (creep: Creep | PowerCreep) => boolean
 /**
  * 默认的对穿规则
  *
@@ -9,18 +8,19 @@ type AllowCrossRuleFunc = (creep: Creep | PowerCreep) => boolean
  *
  * @param creep 被对穿的 creep
  */
-const defaultRule: AllowCrossRuleFunc = (creep) => !creep.memory.stand
+const defaultRule: ALLOW_CROSS_RULE = (creep) => !creep.memory.stand;
 
-const refuseWhenWorking: AllowCrossRuleFunc = (creep) => !creep.memory.working
+const refuseWhenWorking: ALLOW_CROSS_RULE = (creep) => !(creep.memory.actionStage === "working");
 
-export type CrossRules = {
-    [role in Role | 'default'|'pc']?: AllowCrossRuleFunc
+export type CROSS_RULES = {
+    [role in Role | 'default' | 'pc']?: ALLOW_CROSS_RULE
 }
 
-const crossRules: CrossRules = {
-    pc:()=>true,
+const crossRules: CROSS_RULES = {
+    pc: defaultRule,
     default: defaultRule,
-    [Role.Harvester]: refuseWhenWorking
-}
+    [Role.Harvester]: refuseWhenWorking,
+    [Role.Miner]: refuseWhenWorking,
+};
 
-export default crossRules
+export default crossRules;

@@ -1,4 +1,3 @@
-import serializeFarPath from "./modulesGameObject/betterMoveTo";
 import mountGlobal from "./modulesFunction/global"
 export const loop = () => {
     mountGlobal()

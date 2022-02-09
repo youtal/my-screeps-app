@@ -1,3 +1,5 @@
+import {obstacles} from "../../modulesGameObject/betterMoveTo";
+
 export default class RoomPositionExtension extends RoomPosition {
     public onPath(path: number[], idx: number): boolean {
         let now = (this.x & 0b111) | (this.y & 0b111 << 3);
@@ -12,5 +14,17 @@ export default class RoomPositionExtension extends RoomPosition {
         let x = this.x + (dir & 1) - (dir & 2);
         let y = this.y + ((dir & 2) >> 1) - (dir & 4);
         return new RoomPosition(x, y, this.roomName);
+    }
+
+    get walkable(): boolean {
+        let terrainCheck = this.lookFor(LOOK_TERRAIN)[0] === ('plain' || 'swamp');
+        let structureCheck = this.lookFor(LOOK_STRUCTURES).filter(s => (
+            obstacles.includes(s.structureType)
+            || (s.structureType === STRUCTURE_RAMPART && !(<StructureRampart>s).my))).length === 0;
+        let constructionSitesCheck = this.lookFor(LOOK_CONSTRUCTION_SITES).filter(site =>
+            (obstacles.includes(site.structureType)) && site.my).length === 0;
+        let CreepCheck = this.lookFor(LOOK_CREEPS).length === 0;
+        let PowerCreepCheck = this.lookFor(LOOK_POWER_CREEPS).length === 0;
+        return terrainCheck && structureCheck && constructionSitesCheck && CreepCheck && PowerCreepCheck;
     }
 }

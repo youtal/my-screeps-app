@@ -1,20 +1,20 @@
 import {Role} from "./role/role";
-
 declare global {
     type ROOM_NAME = `${'W' | 'E'}${number}${'N' | 'S'}${number}`
-
+    type actionStage = 'prepare' | 'charge' | 'working'
     interface PowerCreepMemory {
-        role: Role;
+        target?: Id<RoomObject>;
         stand?: boolean;
-        working?: boolean;
-        fromShard: string;
+        fromShard?: string;
+        actionStage?: actionStage;
     }
 
     interface CreepMemory {
+        target?: Id<RoomObject>;
         role: Role;
         stand?: boolean;
-        working?: boolean;
-        fromShard: string;
+        fromShard?: string;
+        actionStage?: actionStage;
     }
 
     interface Memory {
@@ -24,14 +24,25 @@ declare global {
         avoidExits?: { [from: ROOM_NAME]: ROOM_NAME };
     }
 
-    interface Creep{
+    interface Creep {
+        isMoving: boolean;
     }
 
-    interface PowerCreep{
+    interface PowerCreep {
+        isMoving: boolean;
     }
+
+    interface RoomMemory{
+        center?:number[];
+    }
+
     interface RoomPosition {
         //用于判断当前位置是否在路径期望位置上
         onPath(path: number[], idx: number): boolean;
-        dirToPos(dir: DirectionConstant): RoomPosition
+        //将相对方向转换为位置
+        dirToPos(dir: DirectionConstant): RoomPosition;
+
+        //是否可通行
+        walkable: boolean;
     }
 }

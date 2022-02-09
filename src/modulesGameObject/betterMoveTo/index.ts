@@ -1,4 +1,5 @@
 import crossRules from "./crossRules";
+import crossDirction from "./crossDirction";
 import {parseInt} from "lodash";
 import {getNearPos} from "../../utils";
 import * as _ from "lodash";
@@ -12,7 +13,7 @@ const terrainCost = {
     '11': [1, 1]
 };
 //不能通过的建筑
-const obstacles = [
+export const obstacles = [
     "spawn",
     "controller",
     "constructedWall",
@@ -33,7 +34,8 @@ const COST_MATRIX_UPDATE_INTERVAL = 10000;
 
 //路径有效期
 const PATH_INTERVAL = 100000;
-
+//核心半径，在房间核心到这个半径内的区域，creep会无脑对穿，防止交通拥挤
+const CORE_RADIUS = 3;
 //路径缓存
 let pathCache: PATH_CACHE = {};
 //按照creep正在使用的路径缓存
@@ -210,6 +212,30 @@ function findPath(start: RoomPosition, goal: RoomPosition, ops: moveOption = {})
                 });
             });
 
+            //首先将Mineral周围的cost调高，目的是让creep倾向规避source周围，避免影响miner工作
+            //此步放在按照地形权重配置之后，覆盖地形权重
+            //TODO：房间对象访问缓存实现后，应换为房间对象缓存访问
+            const mineral = room.find(FIND_MINERALS)[0];
+            if (mineral) {
+                let nearPos = getNearPos(mineral.pos);
+                nearPos.forEach(pos => {
+                    let {x, y} = pos;
+                    if (terrain.get(x, y) !== (TERRAIN_MASK_WALL || TERRAIN_MASK_LAVA))
+                        cost.set(x, y, swapCost * 5);
+                });
+            }
+
+            //将房间核心区设为禁行区
+            if (room.memory.center) {
+                let center = new RoomPosition(room.memory.center[0], room.memory.center[1], roomName);
+                if (center) {
+                    let forbiddenZone = getNearPos(center);
+                    forbiddenZone.forEach(pos => {
+                        let {x, y} = pos;
+                        cost.set(x, y, 0xff);
+                    });
+                }
+            }
             const addCost = (item: Structure | ConstructionSite) => {
                 // 更倾向走道路
                 if (item.structureType === STRUCTURE_ROAD) {
@@ -258,7 +284,7 @@ function findPath(start: RoomPosition, goal: RoomPosition, ops: moveOption = {})
             }
 
             // 跨 shard creep 需要解除目标 portal 的不可移动性（如果有的话）
-            if (ops.crossShard && goal.roomName === roomName) {
+            if (ops.crossShard && (goal.roomName === roomName)) {
                 const portal = goal.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_PORTAL);
                 if (portal) cost.set(goal.x, goal.y, 2);
             }
@@ -329,7 +355,13 @@ function checkPathTarget(path: number[], target: RoomPosition): boolean {
     return end === path[path.length - 1];
 }
 
-const goTo = function (creep: Creep | PowerCreep, target: RoomPosition, ops: moveOption = {}) {
+function translatePath(path: number[], idx: number) {
+    let [r1, r2] = [Math.ceil(idx / 3), idx % 3 * 10];
+    let dataUnit = path[r1] >> r2;
+    return {pos: dataUnit & 0b111111, dir: <DirectionConstant>(dataUnit >> 6 & 0b1111)};
+}
+
+export const goTo = function (creep: Creep | PowerCreep, target: RoomPosition, ops: moveOption = {}) {
     if (!creep.my) return ERR_NOT_OWNER;
     if (creep instanceof Creep) {
         if (!!creep.fatigue) return ERR_TIRED;
@@ -346,15 +378,19 @@ const goTo = function (creep: Creep | PowerCreep, target: RoomPosition, ops: mov
         //没有任何意外
         if (checkPathTarget(curPath.path, target) && creep.pos.onPath(curPath.path, curPath.idx))
             [path, idx] = [curPath.path, curPath.idx];
-        //目标对，但是目前位置不对
-        else if (checkPathTarget(curPath.path, target)) {
-            //在上一个位置，说明被挡路了，要看看有没有建筑，或者请求下对穿
-            if (creep.pos.onPath(curPath.path, curPath.idx - 1)) {
-
+        //目标对，但是目前位置不对，isMoving为false,说明被挡路了,尝试进行对穿
+        else if (checkPathTarget(curPath.path, target) && !creep.isMoving) {
+            let {dir} = translatePath(curPath.path, curPath.idx);
+            const crossResult = requireCross(creep, dir);
+            if (crossResult === OK || crossResult === ERR_NOT_FOUND)
+                return OK;
+            else {
+                ops.ignoreCreeps = false;
+                [path, idx] = [findPath(creep.pos, target, ops), 0];
             }
         }
     } else {
-        //没有正在使用的缓存，尝试从路径缓存中读取
+        //没有正在使用的缓存，或对穿失败，尝试从路径缓存中读取
         let routeKey = generateRouteKey(creep.pos, target, ops.ignoreSwap, ops.ignoreRoads);
         if (pathCache[routeKey] && Game.time - pathCache[routeKey].generateTime < PATH_INTERVAL)
             [path, idx] = [pathCache[routeKey].path, 0];
@@ -362,21 +398,104 @@ const goTo = function (creep: Creep | PowerCreep, target: RoomPosition, ops: mov
         else
             [path, idx] = [findPath(creep.pos, target, ops), 0];
     }
+
+    if (!path || idx >= (path.length - 1) * 3) {
+        delete creepPathCache[creep.name];
+        return ERR_NO_PATH;
+    }
+    let {dir} = translatePath(path, idx);
+    if (creep.room.memory.center) {
+        let center = new RoomPosition(creep.room.memory.center[0], creep.room.memory.center[1], creep.room.name);
+        if (center && creep.pos.getRangeTo(center) <= CORE_RADIUS) {
+            const result = requireCross(creep, dir);
+            if (result === OK || result === ERR_NOT_FOUND) {
+                creepPathCache[creep.name] = {path: path, idx: ++idx};
+                return OK;
+            } else {
+                delete creepPathCache[creep.name];
+                creep.say('😑');
+                return ERR_NO_PATH;
+            }
+        }
+    }
+    creep.move(dir);
+    creepPathCache[creep.name] = {path: path, idx: ++idx};
+    return OK;
+
 };
 
 /**用于请求对穿
  *
  * @param creep 对穿发起creep
  * @param dir 发起对穿方向
+ * @return ERR_NOT_OWNER 目标creep非己方creep
+ * @return ERR_INVALID_ARGS 对穿方向非法或无响应对穿方向
+ * @return ERR_NO_PATH 目标方向有障碍建筑，无法通行
+ * @return ERR_BUSY 目标creep拒绝了对穿请求
+ * @return ERR_NOT_FOUND 目标方向无creep或障碍建筑物，返回此值意味着creep已经想目标方向完成了移动，本tic不应当再进行move操作
+ * @return OK 对穿顺利，返回此值意味着creep已经想目标方向完成了移动，本tic不应当再进行move操作
  * */
-function requireCross(creep: Creep, dir: DirectionConstant) {
+export function requireCross(creep: Creep | PowerCreep, dir: DirectionConstant): ERR_NOT_OWNER | ERR_INVALID_ARGS | ERR_NOT_FOUND | ERR_NO_PATH | ERR_BUSY | OK {
     let frontPos = creep.pos.dirToPos(dir);
     if (!frontPos)
         return ERR_INVALID_ARGS;
     const frontCreep = frontPos.lookFor(LOOK_CREEPS)[0];
     const frontObstacles = frontPos.lookFor(LOOK_STRUCTURES).filter(str => obstacles.includes(str.structureType));
-    if (!frontCreep && !frontObstacles)
-        return ERR_NOT_FOUND;
     if (frontObstacles.length > 0)
         return ERR_NO_PATH;
+    if (!frontCreep && !frontObstacles) {
+        creep.move(dir);
+        return ERR_NOT_FOUND;
+    }
+    const response = responseCross(frontCreep, dir);
+    if (response === OK) {
+        creep.move(dir);
+        return OK;
+    }
+    return response;
 }
+
+/**
+ * 响应对穿请求,如果响应为同意则同时进行移动
+ * */
+function responseCross(creep: Creep | PowerCreep, dir: DirectionConstant): ERR_NOT_OWNER | ERR_BUSY | ERR_INVALID_ARGS | OK {
+    if (!creep.my) return ERR_NOT_OWNER;
+    if (creep instanceof Creep) {
+        if (!!creep.fatigue || creep.spawning || !creep.getActiveBodyparts(MOVE)) return ERR_BUSY;
+    }
+    let response: boolean;
+    if (creep instanceof PowerCreep) {
+        response = crossRules['pc'](creep);
+    } else {
+        response = crossRules[creep.memory.role](creep) || crossRules["default"](creep);
+    }
+    if (!response) return ERR_BUSY;
+
+    let crossDir: DirectionConstant;
+    if (creep instanceof PowerCreep)
+        crossDir = crossDirction['pc'](creep, dir);
+    else
+        crossDir = crossDirction[creep.memory.role](creep, dir);
+    if (!crossDir)
+        return ERR_INVALID_ARGS;
+    creep.move(crossDir);
+    return OK;
+
+}
+
+
+/**
+ * 将goTo挂载至creep的原本MoveTo()方法
+ * */
+const mountMoveTo = function () {
+    // @ts-ignore
+    Creep.prototype.moveTo = function (target: { pos: RoomPosition } | RoomPosition, ops: moveOption = {}) {
+        if (target instanceof RoomPosition) {
+            return goTo(this, target, ops);
+        } else {
+            return goTo(this, target.pos, ops);
+        }
+    };
+};
+
+export default mountMoveTo();
